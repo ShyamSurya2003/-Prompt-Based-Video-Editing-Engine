@@ -1,0 +1,59 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prompt Video Editor</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#15181d;--card:#fff;--mut:#667;--acc:#2b59ff;--bd:#dde1e7}
+@media(prefers-color-scheme:dark){:root{--bg:#10131a;--fg:#e8ebf0;--card:#1a1f29;--mut:#9aa3b2;--acc:#7d9bff;--bd:#2a3140}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:1fr}
+@media(min-width:860px){main{grid-template-columns:1fr 1fr}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;min-width:0}
+h1{font-size:18px;margin:0 0 4px}small,.mut{color:var(--mut)}
+.stage{position:relative;margin-top:8px}video{width:100%;border-radius:8px;background:#000;display:block}
+#cap{position:absolute;left:0;right:0;bottom:14%;text-align:center;font-weight:700;text-shadow:0 0 3px #000,0 0 3px #000;pointer-events:none}
+#log{height:300px;overflow:auto;display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.m{padding:6px 9px;border-radius:8px;border:1px solid var(--bd);font-size:13px}.u{background:var(--acc);color:#fff;align-self:flex-end;border:0}
+.applied{border-left:4px solid #1a9c55}.needs_clarification{border-left:4px solid #e0a000}.rejected{border-left:4px solid #d33}
+form{display:flex;gap:6px}input{flex:1;min-width:0;padding:8px;border-radius:8px;border:1px solid var(--bd);background:var(--bg);color:var(--fg)}
+button{padding:8px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--fg);cursor:pointer}button.p{background:var(--acc);color:#fff;border:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.chips button{font-size:12px;padding:4px 8px}
+pre{font-size:11px;max-height:150px;overflow:auto;background:var(--bg);padding:8px;border-radius:8px}
+</style></head><body><main>
+<section class="card"><h1>Prompt-based video editor</h1><small>Sample video (3:06). Type edits; the preview plays the edited timeline. Edits stick to words, not clock time. Final rendering is done by the CLI (see README).</small>
+<div class="stage"><video id="v" src="interview.mp4" controls playsinline preload="auto"></video><div id="cap"></div></div>
+<div class="mut" id="stat"></div><details><summary>Timeline JSON</summary><pre id="tl"></pre></details></section>
+<section class="card"><div id="log"></div>
+<form id="f"><input id="i" autocomplete="off" placeholder="e.g. Cut the first 30 seconds" aria-label="Edit instruction"><button class="p">Send</button></form>
+<div class="chips" id="chips"></div>
+<div class="chips"><button id="reset" type="button">Reset session</button></div></section>
+</main><script>
+const $=id=>document.getElementById(id), steps=[]; let tl=null, pendingQ=false;
+const EX=["Add a caption 'Welcome!' when I say welcome to the channel","Cut the first 30 seconds","Remove the part about pricing","Speed up from 1:00 to 1:30 by 2x","Actually, put the intro back","Undo","Make that caption red","Remove filler words","Remove silences longer than 1 second","Add background music","Cut everything","Speed up 10x from 0:10 to 0:20","Make it bigger"];
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+$('chips').innerHTML=EX.map(e=>`<button type="button">${esc(e)}</button>`).join('');
+$('chips').onclick=e=>{if(e.target.tagName==='BUTTON'){$('i').value=e.target.textContent;$('i').focus()}};
+function add(cls,html){const d=document.createElement('div');d.className='m '+cls;d.innerHTML=html;$('log').append(d);$('log').scrollTop=1e9}
+async function run(){const r=await fetch('/api/v1/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({steps})});return r.json()}
+async function send(text){
+  add('u',esc(text));
+  if(pendingQ){steps[steps.length-1].answer=text;pendingQ=false}else steps.push({say:text});
+  const d=await run(); if(d.error){add('rejected',esc(d.error.message));return}
+  const last=d.results[d.results.length-1], r=last.answered||last; tl=d.timeline;
+  let h=`<b>${r.status.replace('_',' ')}</b> — ${esc(r.summary||'')}`;
+  if(r.status==='needs_clarification'){pendingQ=true;h+=`<br>${esc(r.question)}<br><i>${r.options.map(esc).join(' · ')}</i><br><small>Reply with your choice (e.g. "the second one" or "all").</small>`}
+  if(r.warnings&&r.warnings.length)h+=`<br><small>⚠ ${r.warnings.map(esc).join(' ')}</small>`;
+  add(r.status,h+`<br><small>hash ${r.timeline_hash} · ${r.duration_s}s</small>`); show();
+}
+function show(){$('stat').textContent=`Edited length ${tl.duration_s}s (original ${tl.source.duration}s) · ${tl.segments.length} segment(s) · hash ${tl.timeline_hash}`;$('tl').textContent=JSON.stringify(tl,null,1);$('v').currentTime=tl.segments[0].src_start}
+const v=$('v');
+function tick(){ if(tl&&!v.paused){
+  const t=v.currentTime, g=tl.segments.find(g=>t>=g.src_start-0.05&&t<g.src_end);
+  if(!g){const n=tl.segments.find(g=>g.src_start>t); if(n)v.currentTime=n.src_start; else v.pause();}
+  else{v.playbackRate=g.speed; const o=g.out_start+(t-g.src_start)/g.speed;
+    const c=tl.captions.find(c=>o>=c.out_start&&o<=c.out_end); $('cap').textContent=c?c.text:''; if(c){$('cap').style.color=c.color;$('cap').style.fontSize=c.size*0.7+'px'}
+    v.muted=tl.mutes.some(m=>t>=m.src_start&&t<=m.src_end)}}
+  requestAnimationFrame(tick)}
+tick();
+$('f').onsubmit=e=>{e.preventDefault();const t=$('i').value.trim();if(t){$('i').value='';send(t)}};
+$('reset').onclick=()=>{steps.length=0;pendingQ=false;$('log').innerHTML='';run().then(d=>{tl=d.timeline;show()})};
+$('reset').click();
+</script></body></html>

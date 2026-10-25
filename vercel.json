@@ -1,0 +1,1 @@
+{ "functions": { "api/v1/session.js": { "includeFiles": "sample/transcript.json" } } }
