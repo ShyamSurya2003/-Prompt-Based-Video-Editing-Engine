@@ -2,7 +2,7 @@
 
 Type what you want ("cut the first 30 seconds", "remove the part about pricing"); the engine turns it into structured, reversible operations on a timeline and renders the result.
 
-**Live demo:** see the Vercel link in the repo description / below. **Sample video:** `sample/interview.mp4` (3:06, synthetic TTS speaker, with `sample/transcript.json`).
+**Live demo:** https://incubrix-video-editor.vercel.app **Sample video:** `sample/interview.mp4` (3:06, synthetic TTS speaker, with `sample/transcript.json`).
 
 ## How it works
 - `engine/engine.js` — rule-based instruction parser + timeline logic (no AI model, so it is fully deterministic).
